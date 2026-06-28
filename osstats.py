@@ -7,6 +7,7 @@ import configparser
 import redis
 import openpyxl
 import asyncio
+from tqdm import tqdm
 from tqdm.asyncio import trange
 
 
@@ -142,7 +143,7 @@ async def process_node(section, config, node, is_master_shard, duration):
         command stats output
     """
     params = node.split(":")
-    print("Processing node {}:{}".format(params[0], params[1]))
+    tqdm.write("Processing node {}:{}".format(params[0], params[1]))
 
     client = get_redis_client(
         host=config.get("host"),
@@ -750,7 +751,7 @@ async def process_node(section, config, node, is_master_shard, duration):
 
 async def process_database(config, section, duration):
 
-    print("\nConnecting to {} database ..".format(section))
+    tqdm.write("\nConnecting to {} database ..".format(section))
 
     client = get_redis_client(
         host=config.get("host"),
@@ -765,9 +766,9 @@ async def process_database(config, section, duration):
 
     try:
         client.ping()
-        print("Connected to {} database".format(section))
+        tqdm.write("Connected to {} database".format(section))
     except BaseException:
-        print("Error connecting to {} database".format(section))
+        tqdm.write("Error connecting to {} database".format(section))
         return None
 
     info = client.execute_command("info")

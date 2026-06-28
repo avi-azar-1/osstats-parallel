@@ -748,12 +748,7 @@ async def process_node(section, config, node, is_master_shard, duration):
     return result
 
 
-async def run_tasks(tasks):
-    res = await asyncio.gather(*tasks)
-    return res
-
-
-def process_database(config, section, workbook, duration, loop):
+async def process_database(config, section, duration):
 
     print("\nConnecting to {} database ..".format(section))
 
@@ -773,7 +768,7 @@ def process_database(config, section, workbook, duration, loop):
         print("Connected to {} database".format(section))
     except BaseException:
         print("Error connecting to {} database".format(section))
-        return workbook
+        return None
 
     info = client.execute_command("info")
     if "cluster_enabled" in info and info["cluster_enabled"] == 1:
@@ -784,34 +779,25 @@ def process_database(config, section, workbook, duration, loop):
             % (config["host"], config["port"]): {"flags": "master", "connected": True}
         }
 
-    ws = workbook.active
-
-    # Process Redis nodes in parallel
-
     tasks = []
     for node, stats in nodes.items():
         is_master_shard = False
         if stats["flags"].find("master") >= 0:
             is_master_shard = True
         if stats["connected"] is True:
-            tasks.append(
-                loop.create_task(
-                    process_node(section, config, node, is_master_shard, duration)
-                )
-            )
-    tasks.append(loop.create_task(progress(duration)))
-    results = loop.run_until_complete(run_tasks(tasks))
+            tasks.append(process_node(section, config, node, is_master_shard, duration))
 
-    for result in results:
-        node_stats = result
-        if node_stats is not None:
-            if ws.max_row == 1:
-                ws.append(list(node_stats.keys()))
-            ws.append(list(node_stats.values()))
+    results = await asyncio.gather(*tasks)
+    return [r for r in results if r is not None]
 
-    # End
 
-    return workbook
+async def run_all_databases(config, duration):
+    db_tasks = []
+    for section in config.sections():
+        db_tasks.append(process_database(config[section], section, duration))
+    db_tasks.append(progress(duration))
+    all_results = await asyncio.gather(*db_tasks, return_exceptions=True)
+    return [r for r in all_results if r is not None and not isinstance(r, Exception)]
 
 
 def print_results(wb):
@@ -881,14 +867,15 @@ def main():
     print("The output will be stored in {}".format(args.outputFile))
 
     wb = create_workbook()
-    loop = asyncio.get_event_loop()
 
-    #   loop = asyncio.new_event_loop()
-    #   asyncio.set_event_loop(loop)
+    all_results = asyncio.run(run_all_databases(config, args.duration))
 
-    for section in config.sections():
-        wb = process_database(config[section], section, wb, args.duration, loop)
-    loop.close()
+    ws = wb.active
+    for db_results in all_results:
+        for node_stats in db_results:
+            if ws.max_row == 1:
+                ws.append(list(node_stats.keys()))
+            ws.append(list(node_stats.values()))
 
     if args.printOnly:
         print_results(wb)

@@ -83,7 +83,8 @@ black --check osstats.py
 - `get_redis_client()`: Creates Redis connections with TLS support
 - `parse_response()`: Parses Redis INFO command output into Python dictionaries
 - `process_node()`: Async function that collects metrics from individual Redis nodes over time
-- `process_database()`: Orchestrates metric collection for entire database/cluster
+- `process_database()`: Async function that orchestrates metric collection for entire database/cluster
+- `run_all_databases()`: Async orchestrator that runs all databases in parallel via `asyncio.gather()`
 - `main()`: CLI entry point with argument parsing
 
 ### Key Features
@@ -92,7 +93,7 @@ black --check osstats.py
 
 **Cluster Discovery**: Automatically discovers all cluster nodes from a single connection point
 
-**Async Processing**: Uses asyncio for parallel node processing and progress tracking
+**Parallel Processing**: All databases are processed concurrently using `asyncio.gather()` with a single unified progress bar. Nodes within each database are also processed in parallel. Total runtime equals the measurement duration regardless of how many databases are configured.
 
 **TLS Support**: Full TLS/SSL support with client certificates
 
@@ -115,7 +116,7 @@ black --check osstats.py
 
 ## Important Notes
 
-- Script requires Python 3.6+
+- Script requires Python 3.9+
 - Non-intrusive: Does not affect Redis performance or data
 - Best used during peak hours for accurate throughput measurements
 - For clusters, only specify one node per cluster in config - script auto-discovers others

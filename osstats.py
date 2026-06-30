@@ -790,9 +790,10 @@ async def process_database(config, section, duration, semaphore):
     if "cluster_enabled" in info and info["cluster_enabled"] == 1:
         nodes = client.execute_command("cluster nodes")
     else:
+        role = info.get("role", "master")
         nodes = {
             "%s:%s"
-            % (config["host"], config["port"]): {"flags": "master", "connected": True}
+            % (config["host"], config["port"]): {"flags": role, "connected": True}
         }
 
     tasks = []

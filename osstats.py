@@ -788,8 +788,11 @@ async def process_database(config, section, duration):
         if stats["connected"] is True:
             tasks.append(process_node(section, config, node, is_master_shard, duration))
 
-    results = await asyncio.gather(*tasks)
-    return [r for r in results if r is not None]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for r in results:
+        if isinstance(r, Exception):
+            tqdm.write(f"Warning: node error in {section}: {r}")
+    return [r for r in results if r is not None and not isinstance(r, Exception)]
 
 
 async def run_all_databases(config, duration):

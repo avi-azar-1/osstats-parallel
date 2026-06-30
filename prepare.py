@@ -91,6 +91,23 @@ def get_password(host, config_path, port):
     return None
 
 
+def get_cluster_id(host, port, password):
+    """Get a unique cluster fingerprint, or None if instance is standalone."""
+    auth = f"-a '{password}' --no-auth-warning" if password else ""
+    cmd = f"redis-cli -h 127.0.0.1 -p {port} {auth} cluster info 2>/dev/null"
+    stdout, _, rc = ssh_exec(host, cmd)
+    if rc != 0 or "cluster_enabled:1" not in stdout:
+        return None
+
+    cmd = f"redis-cli -h 127.0.0.1 -p {port} {auth} cluster nodes 2>/dev/null"
+    stdout, _, rc = ssh_exec(host, cmd)
+    if rc != 0 or not stdout.strip():
+        return None
+
+    node_ids = sorted(line.split()[0] for line in stdout.strip().splitlines() if line)
+    return "|".join(node_ids)
+
+
 def discover_redis_instances(host):
     """Discover all running Redis instances on a host.
     Returns list of (port, password) tuples."""
@@ -148,12 +165,24 @@ def main():
         for port, password in instances:
             all_instances.append((server, port, password))
 
-    config_content = generate_config(all_instances)
+    seen_clusters = set()
+    deduplicated = []
+
+    for host, port, password in all_instances:
+        cluster_id = get_cluster_id(host, port, password)
+        if cluster_id is None:
+            deduplicated.append((host, port, password))
+        elif cluster_id not in seen_clusters:
+            seen_clusters.add(cluster_id)
+            deduplicated.append((host, port, password))
+
+    config_content = generate_config(deduplicated)
     with open(args.output, "w") as f:
         f.write(config_content)
 
     print(
-        f"Generated {args.output} with {len(all_instances)} Redis instances "
+        f"Generated {args.output} with {len(deduplicated)} Redis instances "
+        f"({len(all_instances) - len(deduplicated)} cluster duplicates removed) "
         f"from {len(servers)} servers"
     )
 

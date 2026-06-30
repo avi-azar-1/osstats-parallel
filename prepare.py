@@ -15,6 +15,7 @@ import argparse
 import subprocess
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 
 def expand_server_line(line):
@@ -160,21 +161,28 @@ def main():
 
     all_instances = []
 
-    for server in servers:
-        instances = discover_redis_instances(server)
+    with ThreadPoolExecutor() as pool:
+        results = pool.map(discover_redis_instances, servers)
+    for server, instances in zip(servers, results):
         for port, password in instances:
             all_instances.append((server, port, password))
+
+    def check_cluster(instance):
+        host, port, password = instance
+        return instance, get_cluster_id(host, port, password)
 
     seen_clusters = set()
     deduplicated = []
 
-    for host, port, password in all_instances:
-        cluster_id = get_cluster_id(host, port, password)
+    with ThreadPoolExecutor() as pool:
+        cluster_results = list(pool.map(check_cluster, all_instances))
+
+    for instance, cluster_id in cluster_results:
         if cluster_id is None:
-            deduplicated.append((host, port, password))
+            deduplicated.append(instance)
         elif cluster_id not in seen_clusters:
             seen_clusters.add(cluster_id)
-            deduplicated.append((host, port, password))
+            deduplicated.append(instance)
 
     config_content = generate_config(deduplicated)
     with open(args.output, "w") as f:

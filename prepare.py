@@ -155,9 +155,7 @@ def main():
             line.strip() for line in f if line.strip() and not line.startswith("#")
         ]
 
-    servers = []
-    for raw in raw_lines:
-        servers.extend(expand_server_line(raw))
+    servers = list(dict.fromkeys(s for raw in raw_lines for s in expand_server_line(raw)))
 
     all_instances = []
 

@@ -95,7 +95,7 @@ def get_password(host, config_path, port):
 def get_cluster_id(host, port, password):
     """Get a unique cluster fingerprint, or None if instance is standalone."""
     auth = f"-a '{password}' --no-auth-warning" if password else ""
-    cmd = f"redis-cli -h 127.0.0.1 -p {port} {auth} cluster info 2>/dev/null"
+    cmd = f"redis-cli -h 127.0.0.1 -p {port} {auth} info cluster 2>/dev/null"
     stdout, _, rc = ssh_exec(host, cmd)
     if rc != 0 or "cluster_enabled:1" not in stdout:
         return None

@@ -131,7 +131,7 @@ async def progress(duration):
         await asyncio.sleep(1)
 
 
-async def process_node(section, config, node, is_master_shard, duration):
+async def process_node(section, config, node, is_master_shard, duration, semaphore):
     """
     Get the current command stats of the passed node
     Args:
@@ -159,13 +159,28 @@ async def process_node(section, config, node, is_master_shard, duration):
     result = {}
 
     # first run
-    res1 = parse_response(client.execute_command("info commandstats"))
-    info1 = client.execute_command("info")
+    async with semaphore:
+        res1 = parse_response(client.execute_command("info commandstats"))
+        info1 = client.execute_command("info")
+        client.close()
+
     await sleep(duration * 60)
 
-    # second run
-    res2 = parse_response(client.execute_command("info commandstats"))
-    info2 = client.execute_command("info")
+    # second run — reconnect for the second sample
+    client = get_redis_client(
+        host=config.get("host"),
+        port=int(config.get("port", 6379)),
+        password=config.get("password") or None,
+        username=config.get("username") or None,
+        tls=config.getboolean("tls", fallback=False),
+        ca_cert=config.get("ca_cert", fallback=None) or None,
+        client_cert=config.get("client_cert", fallback=None) or None,
+        client_key=config.get("client_key", fallback=None) or None,
+    )
+    async with semaphore:
+        res2 = parse_response(client.execute_command("info commandstats"))
+        info2 = client.execute_command("info")
+        client.close()
 
     duration_in_seconds = 60 * duration
 
@@ -749,7 +764,7 @@ async def process_node(section, config, node, is_master_shard, duration):
     return result
 
 
-async def process_database(config, section, duration):
+async def process_database(config, section, duration, semaphore):
 
     tqdm.write("\nConnecting to {} database ..".format(section))
 
@@ -786,7 +801,7 @@ async def process_database(config, section, duration):
         if stats["flags"].find("master") >= 0:
             is_master_shard = True
         if stats["connected"] is True:
-            tasks.append(process_node(section, config, node, is_master_shard, duration))
+            tasks.append(process_node(section, config, node, is_master_shard, duration, semaphore))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for r in results:
@@ -795,10 +810,11 @@ async def process_database(config, section, duration):
     return [r for r in results if r is not None and not isinstance(r, Exception)]
 
 
-async def run_all_databases(config, duration):
+async def run_all_databases(config, duration, concurrency):
+    semaphore = asyncio.Semaphore(concurrency)
     db_tasks = []
     for section in config.sections():
-        db_tasks.append(process_database(config[section], section, duration))
+        db_tasks.append(process_database(config[section], section, duration, semaphore))
     db_tasks.append(progress(duration))
     all_results = await asyncio.gather(*db_tasks, return_exceptions=True)
     return [r for r in all_results if r is not None and not isinstance(r, Exception)]
@@ -850,6 +866,12 @@ def main():
         action="store_true",
         help="Print results only in console",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=50,
+        help="Max simultaneous Redis connections (default: 50)",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.configFile):
@@ -872,7 +894,7 @@ def main():
 
     wb = create_workbook()
 
-    all_results = asyncio.run(run_all_databases(config, args.duration))
+    all_results = asyncio.run(run_all_databases(config, args.duration, args.concurrency))
 
     ws = wb.active
     for db_results in all_results:
